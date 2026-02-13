@@ -64,6 +64,8 @@ Create a dedicated IAM user for deploying this stack. This avoids using a root o
       "Action": [
         "ecr:CreateRepository",
         "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer",
         "ecr:InitiateLayerUpload",
         "ecr:UploadLayerPart",
         "ecr:CompleteLayerUpload",
