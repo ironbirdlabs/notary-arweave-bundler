@@ -144,7 +144,16 @@ aws kms create-key \
   --profile notary-arweave-bundler-deployer
 ```
 
-Note the `Arn` field from the output (e.g. `arn:aws:kms:us-east-1:123456789012:key/abcd-1234-...`). You'll need it in step 4.
+Note the `KeyId` from the output, then create an alias so the key is easy to find in the console:
+
+```bash
+aws kms create-alias \
+  --alias-name alias/notary-arweave-bundler \
+  --target-key-id <KeyId> \
+  --profile notary-arweave-bundler-deployer
+```
+
+Note the key ARN (e.g. `arn:aws:kms:us-east-1:123456789012:key/abcd-1234-...`). You'll need it in step 4.
 
 ### 2. Create API Key (Optional)
 
