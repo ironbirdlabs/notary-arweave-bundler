@@ -21,16 +21,7 @@ Client (SDK) → API Gateway → Lambda (verify) → SQS → Lambda (bundle + su
 
 ## Deploy
 
-### 1. Clone This Repo
-
-```bash
-git clone https://github.com/agentsystems/notary-arweave-bundler.git
-cd notary-arweave-bundler
-```
-
-If you forked this repo, replace the URL with your fork.
-
-### 2. Create KMS Key
+### 1. Create KMS Key
 
 ```bash
 aws kms create-key \
@@ -39,11 +30,11 @@ aws kms create-key \
   --description "Arweave bundler signing key"
 ```
 
-Note the `Arn` field from the output (e.g. `arn:aws:kms:us-east-1:123456789012:key/abcd-1234-...`). You'll need it in step 4.
+Note the `Arn` field from the output (e.g. `arn:aws:kms:us-east-1:123456789012:key/abcd-1234-...`). You'll need it in step 3.
 
-### 3. Pull Image and Push to ECR
+### 2. Pull Image and Push to ECR
 
-AWS Lambda requires images in ECR. Pull the pre-built image from GHCR and push to your account:
+AWS Lambda requires container images in ECR. Pull the pre-built image from GHCR and push to your account:
 
 ```bash
 REGION=$(aws configure get region)
@@ -53,19 +44,23 @@ ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/notary-arweave-bundler
 # Create ECR repository (first time only)
 aws ecr create-repository --repository-name notary-arweave-bundler
 
-# Pull from GHCR (replace with your fork's image path if applicable)
-docker pull ghcr.io/agentsystems/notary-arweave-bundler:main
+# Pull from GHCR
+docker pull ghcr.io/agentsystems/notary-arweave-bundler:latest
 
 # Tag and push to ECR
 aws ecr get-login-password | docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
-docker tag ghcr.io/agentsystems/notary-arweave-bundler:main $ECR_URI:latest
+docker tag ghcr.io/agentsystems/notary-arweave-bundler:latest $ECR_URI:latest
 docker push $ECR_URI:latest
 ```
 
-### 4. Deploy Stack
+### 3. Deploy Stack
+
+Download the SAM template and deploy:
 
 ```bash
-KMS_KEY_ARN="arn:aws:kms:..."  # paste the Arn from step 2
+curl -fLO https://raw.githubusercontent.com/agentsystems/notary-arweave-bundler/main/template.yaml
+
+KMS_KEY_ARN="arn:aws:kms:..."  # paste the Arn from step 1
 
 sam deploy \
   --template-file template.yaml \
@@ -85,7 +80,7 @@ Set `DryRun=true` to test the full pipeline without submitting to Arweave or spe
 
 The API Gateway endpoint URL will be printed in the stack outputs.
 
-### 5. Point SDK
+### 4. Point SDK
 
 Set `bundler_url` in the agentsystems-notary SDK to the API Gateway endpoint from the stack outputs:
 
@@ -103,12 +98,14 @@ notary = NotaryCore(
 If you prefer to build the image yourself instead of pulling from GHCR:
 
 ```bash
+git clone https://github.com/agentsystems/notary-arweave-bundler.git
+cd notary-arweave-bundler
 npm ci
 npm run build
 docker build -t notary-arweave-bundler .
 ```
 
-Then tag and push to your ECR as shown in step 3.
+Then tag and push to your ECR as shown in step 2.
 
 ## Environment Variables
 
