@@ -25,8 +25,8 @@ Client (SDK) → API Gateway → Lambda (verify) → SQS → Lambda (bundle + su
 
 Create a dedicated IAM user for deploying this stack. This avoids using a root or admin account.
 
-1. In the AWS Console, go to **IAM > Users > Create user** (or use the CLI below).
-2. Attach the following inline policy (name it `notary-arweave-bundler-deployer`):
+1. In the AWS Console, go to **IAM > Users > Create user**. Name it `notary-arweave-bundler-deployer`.
+2. Once created, open the user and go to **Permissions > Add permissions > Create inline policy**. Switch to the **JSON** tab, paste the policy below, and name it `deployer`:
 
 ```json
 {
@@ -86,16 +86,45 @@ Create a dedicated IAM user for deploying this stack. This avoids using a root o
         "lambda:*",
         "apigateway:*",
         "sqs:*",
-        "iam:*",
         "logs:*"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "IAMRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:UpdateRole",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:ListRoleTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IAMPassRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "lambda.amazonaws.com"
+        }
+      }
     }
   ]
 }
 ```
 
-3. Create an access key for the user and configure a named CLI profile:
+3. Go to **Security credentials > Create access key**. Configure a named CLI profile:
 
 ```bash
 aws configure --profile notary-arweave-bundler-deployer
