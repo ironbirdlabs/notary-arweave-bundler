@@ -35,13 +35,13 @@ export async function handler(event: SQSEvent): Promise<void> {
     return;
   }
 
-  // Submit to Arweave gateway
-  const submitResponse = await arweave.transactions.post(tx);
-  if (submitResponse.status !== 200 && submitResponse.status !== 208) {
-    throw new Error(
-      `Arweave transaction submission failed: ${submitResponse.status} ${JSON.stringify(submitResponse.data)}`,
-    );
-  }
+  // TODO: Re-enable Arweave submission once end-to-end testing is complete
+  // const submitResponse = await arweave.transactions.post(tx);
+  // if (submitResponse.status !== 200 && submitResponse.status !== 208) {
+  //   throw new Error(
+  //     `Arweave transaction submission failed: ${submitResponse.status} ${JSON.stringify(submitResponse.data)}`,
+  //   );
+  // }
 
-  console.log(`Bundle submitted: ${tx.id} (${dataItems.length} items, ${bundleBuffer.length} bytes)`);
+  console.log(`[SUBMIT DISABLED] Bundle signed but not submitted: ${tx.id} (${dataItems.length} items, ${bundleBuffer.length} bytes)`);
 }
