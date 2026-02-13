@@ -124,7 +124,7 @@ Create a dedicated IAM user for deploying this stack. This avoids using a root o
 }
 ```
 
-3. Go to **Security credentials > Create access key**. Configure a named CLI profile:
+3. Go to **Security credentials > Create access key**. Select **Application running outside AWS**. Configure a named CLI profile:
 
 ```bash
 aws configure --profile notary-arweave-bundler-deployer
