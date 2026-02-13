@@ -2,7 +2,7 @@
 
 Self-hosted Arweave bundler for [agentsystems-notary](https://github.com/agentsystems/notary). Receives signed ANS-104 DataItems from SDK clients, batches them via SQS, and submits multi-item bundles as L1 Arweave transactions.
 
-The operator pays for permanent storage (AR tokens) and AWS compute. Clients submit DataItems for free — the operator subsidizes the uploads.
+The operator pays for Arweave storage (AR tokens) and AWS compute. Clients submit DataItems for free — the operator subsidizes the uploads.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ Client (SDK) → API Gateway → Lambda (verify) → SQS → Lambda (bundle + su
 
 ### 1. Create KMS Key
 
-This RSA-4096 key is your Arweave wallet. KMS holds the private key (it never leaves AWS), and the bundler uses it to sign Arweave transactions.
+This RSA-4096 key is your Arweave wallet. The bundler uses KMS to sign Arweave transactions without the private key ever being exposed to application code.
 
 ```bash
 aws kms create-key \
@@ -120,7 +120,7 @@ aws kms get-public-key --key-id "$KMS_KEY_ARN" --output text --query PublicKey |
   "
 ```
 
-Send AR to this address. You can acquire AR from an exchange and transfer it, or fund it from an existing wallet. The bundler needs AR to pay for L1 transaction storage — each bundle costs roughly 0.000001 AR per KB.
+Send AR to this address. You can acquire AR from an exchange and transfer it, or fund it from an existing wallet. The bundler needs AR to pay for L1 transaction storage. See [arweave.net](https://arweave.net) for current pricing.
 
 You can check your balance at `https://arweave.net/wallet/<ADDRESS>/balance`.
 
