@@ -1,4 +1,4 @@
-import { Tag } from "@dha-team/arbundles";
+import type { Tag } from "./data-item";
 
 export type ValidationResult =
   | { valid: true }

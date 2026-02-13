@@ -1,4 +1,3 @@
-import { longTo32ByteArray } from "@dha-team/arbundles";
 import crypto from "crypto";
 
 export function assembleBundle(dataItems: Buffer[]): Buffer {
@@ -19,4 +18,13 @@ export function assembleBundle(dataItems: Buffer[]): Buffer {
 
   // Concatenate: header + all DataItem binaries
   return Buffer.concat([...headerBuffers, ...dataItems]);
+}
+
+function longTo32ByteArray(long: number): Uint8Array {
+  const buf = new Uint8Array(32);
+  for (let i = 0; i < 8 && long > 0; i++) {
+    buf[i] = long & 0xff;
+    long = Math.floor(long / 256);
+  }
+  return buf;
 }

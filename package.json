@@ -10,7 +10,6 @@
   "dependencies": {
     "@aws-sdk/client-kms": "^3.700.0",
     "@aws-sdk/client-sqs": "^3.700.0",
-    "@dha-team/arbundles": "^1.0.1",
     "arweave": "^1.15.5"
   },
   "devDependencies": {
