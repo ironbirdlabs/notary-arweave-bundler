@@ -31,8 +31,8 @@ export interface ParsedDataItem {
 //   [rest]      Data payload
 
 const SIG_TYPE_OFFSET = 0;
-const SIG_OFFSET = 2;
-const SIG_LENGTH = 512;
+export const SIG_OFFSET = 2;
+export const SIG_LENGTH = 512;
 const OWNER_OFFSET = SIG_OFFSET + SIG_LENGTH; // 514
 const OWNER_LENGTH = 512;
 const FLAGS_START = OWNER_OFFSET + OWNER_LENGTH; // 1026

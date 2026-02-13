@@ -81,7 +81,6 @@ RUN find /build/licenses -name "*.json" -o -name "*.txt" -o -name "*.md" | \
 RUN npm uninstall -g license-checker-rseidelsohn
 
 # Prune to production-only dependencies for the final image
-# --omit=optional excludes GPL-3.0 arweave-stream-tx (unused file-streaming module)
 RUN npm ci --omit=dev --omit=optional
 
 # -----------------------------------------------------------------------------

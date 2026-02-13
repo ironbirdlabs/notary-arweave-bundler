@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { SIG_OFFSET, SIG_LENGTH } from "./data-item";
 
 export function assembleBundle(dataItems: Buffer[]): Buffer {
   const headerBuffers: Buffer[] = [];
@@ -8,8 +9,7 @@ export function assembleBundle(dataItems: Buffer[]): Buffer {
 
   // Index: 32-byte size + 32-byte ID per item
   for (const item of dataItems) {
-    // Signature starts at offset 2 (after 2-byte signature type), 512 bytes for RSA-4096
-    const signature = item.subarray(2, 514);
+    const signature = item.subarray(SIG_OFFSET, SIG_OFFSET + SIG_LENGTH);
     const id = crypto.createHash("sha256").update(signature).digest();
 
     headerBuffers.push(Buffer.from(longTo32ByteArray(item.length)));

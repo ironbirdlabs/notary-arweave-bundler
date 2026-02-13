@@ -31,12 +31,12 @@ jobs:
       - name: Verify image contents
         run: |
           docker run --rm --entrypoint sh notary-arweave-bundler -c '
+            set -e
             echo "Checking compiled handlers..."
             ls -la handlers/verify.js handlers/bundle.js
             echo "Checking lib..."
             ls -la lib/
             echo "Checking node_modules..."
-            ls node_modules/@dha-team/arbundles/package.json
             ls node_modules/arweave/package.json
             echo "Image contents verified"
           '
