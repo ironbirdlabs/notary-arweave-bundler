@@ -1,0 +1,366 @@
+name: Build and Release to GHCR
+
+# Workflow for building and releasing notary-arweave-bundler Docker images to GitHub Container Registry
+#
+# Manual workflow dispatch only - matches agentsystems release pattern
+# No automatic triggers on push/merge/tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 0.1.0 or v0.1.0)'
+        required: true
+      push:
+        description: 'Push to registry'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      tag_release:
+        description: 'Create git tag and GitHub release (only if push is true)'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      docker_tags: ${{ steps.tags.outputs.tags }}
+      should_push: ${{ steps.push.outputs.should_push }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if version already exists
+        if: github.event.inputs.push == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          DOCKER_VERSION="${VERSION#v}"
+
+          echo "Checking if version ${DOCKER_VERSION} already exists..."
+
+          if gh api "/orgs/${{ github.repository_owner }}/packages/container/notary-arweave-bundler/versions" \
+             --jq '.[].metadata.container.tags[]' 2>/dev/null | grep -q "^${DOCKER_VERSION}$"; then
+            echo "ERROR: Version ${DOCKER_VERSION} already exists in registry!"
+            echo "   Cannot overwrite existing versions."
+            echo "   Please use a different version number."
+            exit 1
+          fi
+
+          echo "Version ${DOCKER_VERSION} is available"
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          DOCKER_VERSION="${VERSION#v}"
+
+          if [[ "${{ github.event.inputs.tag_release }}" == "true" ]]; then
+            if [[ ! "${DOCKER_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "ERROR: Production releases must use semantic versioning (X.Y.Z)"
+              echo "   You entered: ${DOCKER_VERSION}"
+              exit 1
+            fi
+          else
+            if [[ ! "${DOCKER_VERSION}" =~ - ]]; then
+              echo "ERROR: Non-production releases must have a suffix (e.g., 0.1.0-rc1, 0.1.0-test)"
+              echo "   You entered: ${DOCKER_VERSION}"
+              echo "   For production release, use push=true and tag_release=true"
+              exit 1
+            fi
+            BASE_VERSION="${DOCKER_VERSION%%-*}"
+            if [[ ! "${BASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "ERROR: Base version must be X.Y.Z format: ${BASE_VERSION}"
+              exit 1
+            fi
+          fi
+
+          if [[ "${{ github.event.inputs.push }}" == "false" ]] && [[ "${{ github.event.inputs.tag_release }}" == "true" ]]; then
+            echo "ERROR: Cannot create release tags without pushing!"
+            exit 1
+          fi
+
+          if [[ "${{ github.event.inputs.tag_release }}" == "true" ]]; then
+            CURRENT_BRANCH="${{ github.ref_name }}"
+            if [[ "${CURRENT_BRANCH}" != "main" ]]; then
+              echo "ERROR: Production releases must be from main branch!"
+              echo "   Current branch: ${CURRENT_BRANCH}"
+              exit 1
+            fi
+          fi
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "docker_version=${DOCKER_VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION} (Docker: ${DOCKER_VERSION})"
+
+      - name: Determine Docker tags
+        id: tags
+        run: |
+          DOCKER_VERSION="${{ steps.version.outputs.docker_version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+
+          TAGS="${IMAGE}:${DOCKER_VERSION}"
+
+          if [[ "${{ github.event.inputs.tag_release }}" == "true" ]] && [[ ! "${DOCKER_VERSION}" =~ - ]]; then
+            TAGS="${TAGS},${IMAGE}:latest"
+          fi
+
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            TAGS="${TAGS},${IMAGE}:sha-${GITHUB_SHA::8}"
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "Tags: ${TAGS}"
+
+      - name: Determine if should push
+        id: push
+        run: |
+          SHOULD_PUSH="${{ github.event.inputs.push }}"
+          echo "should_push=${SHOULD_PUSH}" >> $GITHUB_OUTPUT
+          echo "Push to registry: ${SHOULD_PUSH}"
+
+  build:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pre-build security check
+        run: |
+          echo "Checking source for sensitive files..."
+
+          if find . -name ".env" -not -name ".env.example" | grep .; then
+            echo "ERROR: Found .env file in source!"
+            exit 1
+          fi
+
+          if [ ! -f .dockerignore ]; then
+            echo "WARNING: No .dockerignore file found"
+          else
+            echo ".dockerignore found, checking contents..."
+            for pattern in ".env" ".git" "node_modules" "*.key" "*.pem"; do
+              if ! grep -q "$pattern" .dockerignore; then
+                echo "WARNING: Consider adding '$pattern' to .dockerignore"
+              fi
+            done
+          fi
+
+          echo "Pre-build security check completed"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Verify package integrity
+        run: npm ci --audit
+
+      - name: Compile TypeScript
+        run: npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: needs.validate.outputs.should_push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ needs.validate.outputs.should_push == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ needs.validate.outputs.should_push == 'true' }}
+          load: ${{ needs.validate.outputs.should_push == 'false' }}
+          tags: ${{ needs.validate.outputs.docker_tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: ${{ needs.validate.outputs.should_push == 'true' }}
+          sbom: ${{ needs.validate.outputs.should_push == 'true' }}
+
+      - name: Security scan
+        run: |
+          echo "Scanning image for secrets and sensitive data..."
+
+          IMAGE_TO_SCAN="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate.outputs.version }}"
+
+          if [[ "${{ needs.validate.outputs.should_push }}" == "true" ]]; then
+            echo "Pulling pushed image: ${IMAGE_TO_SCAN}"
+            docker pull "${IMAGE_TO_SCAN}"
+          else
+            echo "Using locally loaded image: ${IMAGE_TO_SCAN}"
+          fi
+
+          docker run --rm --entrypoint sh "${IMAGE_TO_SCAN}" -c '
+            echo "Checking for .env files..."
+            if find /var/task -name ".env" -o -name "*.env" 2>/dev/null | grep -v "\.env\.example" | grep .; then
+              echo "ERROR: Found .env files in image!"
+              exit 1
+            fi
+
+            echo "Checking for .git directory..."
+            if [ -d "/var/task/.git" ]; then
+              echo "ERROR: .git directory found in image!"
+              exit 1
+            fi
+
+            echo "Checking for config files..."
+            if find /var/task -name ".npmrc" -o -name ".netrc" -o -name ".aws" 2>/dev/null | grep .; then
+              echo "ERROR: Found config files that may contain credentials!"
+              exit 1
+            fi
+
+            echo "Checking for private keys..."
+            if find /var/task -name "*.pem" -o -name "*.key" -o -name "*_rsa" 2>/dev/null | grep -v "/usr/lib" | grep -v "/lib" | grep .; then
+              echo "WARNING: Found potential private key files"
+            fi
+
+            echo "Security scan completed - no secrets found"
+          '
+
+          echo "Security scan PASSED"
+
+  create-release:
+    needs: [validate, build]
+    if: github.event.inputs.tag_release == 'true' && github.event.inputs.push == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+
+          if gh release view "v${VERSION}" &>/dev/null; then
+            echo "Release v${VERSION} already exists"
+          else
+            echo "Creating release v${VERSION}..."
+
+            cat > release_notes.md << EOF
+          ## notary-arweave-bundler ${VERSION}
+
+          Self-hosted Arweave bundler for agentsystems-notary.
+
+          ### Docker Images
+          \`\`\`bash
+          # Pull from GHCR
+          docker pull ${IMAGE}:${VERSION#v}
+          docker pull ${IMAGE}:latest
+          \`\`\`
+
+          ### Deploy to AWS
+          See [README](https://github.com/${{ github.repository }}/blob/main/README.md) for full deployment instructions.
+
+          \`\`\`bash
+          # Tag and push to your ECR
+          REGION=\$(aws configure get region)
+          ACCOUNT=\$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI=\$ACCOUNT.dkr.ecr.\$REGION.amazonaws.com/notary-arweave-bundler
+
+          docker tag ${IMAGE}:${VERSION#v} \$ECR_URI:latest
+          docker push \$ECR_URI:latest
+
+          # Deploy with SAM
+          sam deploy --template-file template.yaml \\
+            --stack-name notary-arweave-bundler \\
+            --parameter-overrides KmsKeyArn=\$KMS_KEY_ARN ImageUri=\$ECR_URI:latest \\
+            --capabilities CAPABILITY_IAM --resolve-s3
+          \`\`\`
+
+          ### Container Registry
+          - GHCR: https://github.com/${{ github.repository }}/pkgs/container/notary-arweave-bundler
+          EOF
+
+            gh release create "v${VERSION}" \
+              --title "v${VERSION}" \
+              --notes-file release_notes.md \
+              --target ${{ github.sha }}
+
+            echo "Release created successfully"
+          fi
+
+  summary:
+    if: always()
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: \`${{ needs.validate.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Push to registry: ${{ needs.validate.outputs.should_push }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.validate.outputs.should_push }}" == "true" ]]; then
+            echo "### Published Images" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "${{ needs.validate.outputs.docker_tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            echo "### Pull Commands" >> $GITHUB_STEP_SUMMARY
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+            VERSION="${{ needs.validate.outputs.version }}"
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            if [[ "${VERSION}" == v* ]]; then
+              echo "docker pull ${IMAGE}:${VERSION#v}" >> $GITHUB_STEP_SUMMARY
+              echo "docker pull ${IMAGE}:latest" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "docker pull ${IMAGE}:${VERSION}" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Validation: ${{ needs.validate.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY

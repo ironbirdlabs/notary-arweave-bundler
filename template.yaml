@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Self-hosted Arweave bundler for agentsystems-notary
+
+Parameters:
+  KmsKeyArn:
+    Type: String
+    Description: ARN of the AWS KMS RSA-4096 key used for signing Arweave transactions
+  ImageUri:
+    Type: String
+    Description: ECR image URI for the Lambda container
+  ApiKey:
+    Type: String
+    Description: Optional API key to protect the endpoint (leave empty for open access)
+    Default: ""
+    NoEcho: true
+  DryRun:
+    Type: String
+    Description: Set to "true" to skip Arweave submission (test the full pipeline without spending AR)
+    Default: "false"
+    AllowedValues: ["true", "false"]
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+
+Resources:
+  # --- API Gateway ---
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: "$default"
+
+  # --- Lambda 1: Verify DataItem + enqueue ---
+  VerifyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command: ["handlers/verify.handler"]
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          SQS_QUEUE_URL: !Ref BundleQueue
+          API_KEY: !Ref ApiKey
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt BundleQueue.QueueName
+      Events:
+        PostDataItem:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /
+            Method: POST
+
+  # --- Lambda 2: Bundle + submit to Arweave ---
+  BundleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command: ["handlers/bundle.handler"]
+      MemorySize: 512
+      Timeout: 120
+      Environment:
+        Variables:
+          KMS_KEY_ARN: !Ref KmsKeyArn
+          ARWEAVE_GATEWAY_URL: "https://arweave.net"
+          DRY_RUN: !Ref DryRun
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:GetPublicKey
+              Resource: !Ref KmsKeyArn
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt BundleQueue.Arn
+            BatchSize: 1000
+            MaximumBatchingWindowInSeconds: 60
+
+  # --- SQS Queues ---
+  BundleQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 180
+      MessageRetentionPeriod: 345600 # 4 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt BundleDLQ.Arn
+        maxReceiveCount: 3
+
+  BundleDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600 # 14 days
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  BundleQueueUrl:
+    Description: SQS queue URL
+    Value: !Ref BundleQueue
+  BundleDLQUrl:
+    Description: Dead letter queue URL
+    Value: !Ref BundleDLQ
