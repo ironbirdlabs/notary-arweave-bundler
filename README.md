@@ -71,7 +71,7 @@ Create a dedicated IAM user for deploying this stack. This avoids using a root o
         "ecr:CompleteLayerUpload",
         "ecr:PutImage"
       ],
-      "Resource": "arn:aws:ecr:*:*:repository/notary-arweave-bundler"
+      "Resource": "arn:aws:ecr:*:*:repository/notary*"
     },
     {
       "Sid": "STS",
