@@ -1,6 +1,6 @@
-name: Build and Release to GHCR
+name: Build and Release
 
-# Workflow for building and releasing notary-arweave-bundler Docker images to GitHub Container Registry
+# Workflow for building, releasing, and deploying notary-arweave-bundler
 #
 # Manual workflow dispatch only - matches agentsystems release pattern
 # No automatic triggers on push/merge/tag
@@ -12,7 +12,7 @@ on:
         description: 'Version to build (e.g., 0.1.0 or v0.1.0)'
         required: true
       push:
-        description: 'Push to registry'
+        description: 'Push to registries and deploy to Lambda'
         required: true
         default: 'false'
         type: choice
@@ -261,6 +261,75 @@ jobs:
 
           echo "Security scan PASSED"
 
+      # --- Deploy to ECR + Lambda (only when pushing) ---
+
+      - name: Configure AWS credentials
+        if: needs.validate.outputs.should_push == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        if: needs.validate.outputs.should_push == 'true'
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push to ECR
+        if: needs.validate.outputs.should_push == 'true'
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          DOCKER_VERSION="${VERSION#v}"
+
+          GHCR_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${DOCKER_VERSION}"
+          ECR_REPO="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/notary-arweave-bundler"
+          ECR_IMAGE="${ECR_REPO}:${DOCKER_VERSION}"
+
+          echo "Tagging for ECR: ${ECR_IMAGE}"
+          docker tag "${GHCR_IMAGE}" "${ECR_IMAGE}"
+
+          echo "Pushing to ECR..."
+          docker push "${ECR_IMAGE}"
+
+          echo "ecr_image=${ECR_IMAGE}" >> $GITHUB_ENV
+
+      - name: Update Lambda functions
+        if: needs.validate.outputs.should_push == 'true'
+        run: |
+          STACK_NAME="notary-arweave-bundler"
+
+          echo "Looking up Lambda function names from stack ${STACK_NAME}..."
+
+          VERIFY_FUNCTION=$(aws cloudformation describe-stack-resource \
+            --stack-name "${STACK_NAME}" \
+            --logical-resource-id VerifyFunction \
+            --query 'StackResourceDetail.PhysicalResourceId' \
+            --output text)
+
+          BUNDLE_FUNCTION=$(aws cloudformation describe-stack-resource \
+            --stack-name "${STACK_NAME}" \
+            --logical-resource-id BundleFunction \
+            --query 'StackResourceDetail.PhysicalResourceId' \
+            --output text)
+
+          echo "VerifyFunction: ${VERIFY_FUNCTION}"
+          echo "BundleFunction: ${BUNDLE_FUNCTION}"
+
+          echo "Updating VerifyFunction..."
+          aws lambda update-function-code \
+            --function-name "${VERIFY_FUNCTION}" \
+            --image-uri "${ecr_image}" \
+            --publish
+
+          echo "Updating BundleFunction..."
+          aws lambda update-function-code \
+            --function-name "${BUNDLE_FUNCTION}" \
+            --image-uri "${ecr_image}" \
+            --publish
+
+          echo "Both Lambda functions updated successfully"
+
   create-release:
     needs: [validate, build]
     if: github.event.inputs.tag_release == 'true' && github.event.inputs.push == 'true'
@@ -351,4 +420,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Job Results" >> $GITHUB_STEP_SUMMARY
           echo "- Validation: ${{ needs.validate.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Build: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build + Deploy: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
