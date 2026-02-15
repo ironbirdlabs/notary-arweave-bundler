@@ -1,8 +1,6 @@
 # notary-arweave-bundler
 
-Self-hosted Arweave bundler for [agentsystems-notary](https://github.com/agentsystems/notary). Receives signed ANS-104 DataItems from SDK clients, batches them via SQS, and submits multi-item bundles as L1 Arweave transactions.
-
-The operator pays for Arweave storage (AR tokens) and AWS compute. Clients submit DataItems for free — the operator subsidizes the uploads.
+Self-hosted Arweave bundler for [agentsystems-notary](https://github.com/agentsystems/agentsystems-notary). Receives signed ANS-104 DataItems from SDK clients, batches them via SQS, and submits multi-item bundles as L1 Arweave transactions.
 
 ## Architecture
 
@@ -57,7 +55,7 @@ Client (SDK) → API Gateway → Lambda (verify) → SQS → Lambda (bundle + su
 3. The workflow builds the image, pushes to GHCR + ECR, runs `sam deploy` to create the full stack, and creates a GitHub release.
 4. When complete, check the **workflow summary** for your API Gateway endpoint URL and Arweave address.
 
-### Step 4: Fund & Go Live
+### Step 4: Fund
 
 Send AR to the Arweave address shown in the workflow summary.
 

@@ -233,7 +233,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Arweave Address:** \`${ARWEAVE_ADDRESS}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Fund this address with AR, then point your SDK at the endpoint." >> $GITHUB_STEP_SUMMARY
+          echo "Point your SDK at the endpoint. The Arweave address must hold AR for transaction submission." >> $GITHUB_STEP_SUMMARY
 
   create-release:
     needs: [validate, build-and-deploy]
